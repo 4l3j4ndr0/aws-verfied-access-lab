@@ -1,0 +1,347 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Parameters:
+  VpcCidrBlock:
+    Type: String
+    Default: "10.0.0.0/16"
+    Description: CIDR block for the VPC
+    
+
+Resources:
+# --------------------------- Start Network section -------------------------- #
+  MyVPC:
+    Type: "AWS::EC2::VPC"
+    Properties:
+      CidrBlock: !Ref VpcCidrBlock
+      Tags:
+      - Key: Name
+        Value: testing-vpc
+  
+  PublicSubnet1:
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      VpcId: !Ref MyVPC
+      CidrBlock: !Select [0, !Cidr [!Ref VpcCidrBlock, 256, 8]]
+      AvailabilityZone: us-east-1a
+      Tags:
+      - Key: Name
+        Value: public-1a
+
+  PublicSubnet2:
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      VpcId: !Ref MyVPC
+      CidrBlock: !Select [1, !Cidr [!Ref VpcCidrBlock, 256, 8]]
+      AvailabilityZone: us-east-1b
+      Tags:
+      - Key: Name
+        Value: public-1b
+
+  PrivateSubnet1:
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      VpcId: !Ref MyVPC
+      CidrBlock: !Select [2, !Cidr [!Ref VpcCidrBlock, 256, 8]]
+      AvailabilityZone: us-east-1a
+      Tags:
+      - Key: Name
+        Value: private-1a
+
+  PrivateSubnet2:
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      VpcId: !Ref MyVPC
+      CidrBlock: !Select [3, !Cidr [!Ref VpcCidrBlock, 256, 8]]
+      AvailabilityZone: us-east-1b
+      Tags:
+      - Key: Name
+        Value: private-1c
+
+  InternetGateway:
+    Type: "AWS::EC2::InternetGateway"
+
+  VPCGatewayAttachment:
+    Type: "AWS::EC2::VPCGatewayAttachment"
+    Properties:
+      VpcId: !Ref MyVPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicRouteTable:
+    Type: "AWS::EC2::RouteTable"
+    Properties:
+      VpcId: !Ref MyVPC
+
+  PublicRoute:
+    Type: "AWS::EC2::Route"
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: "0.0.0.0/0"
+      GatewayId: !Ref InternetGateway
+
+  PrivateRouteTable:
+    Type: "AWS::EC2::RouteTable"
+    Properties:
+      VpcId: !Ref MyVPC
+
+  NatGatewayEIP:
+    Type: "AWS::EC2::EIP"
+    Properties:
+      Domain: "vpc"
+
+  NatGateway:
+    Type: "AWS::EC2::NatGateway"
+    Properties:
+      AllocationId: !GetAtt NatGatewayEIP.AllocationId
+      SubnetId: !Ref PublicSubnet1
+
+  PrivateRoute1:
+    Type: "AWS::EC2::Route"
+    DependsOn: NatGateway
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: "0.0.0.0/0"
+      NatGatewayId: !Ref NatGateway      
+      
+  PublicSubnet1RouteTableAssociation:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnet2RouteTableAssociation:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable
+
+  PrivateSubnet1RouteTableAssociation:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      RouteTableId: !Ref PrivateRouteTable
+
+  PrivateSubnet2RouteTableAssociation:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRouteTable
+# ---------------------------- End Network section --------------------------- #
+
+# ----------------------------- Start ECS section ---------------------------- #
+  EcsCluster:
+    Type: "AWS::ECS::Cluster"
+    DependsOn: MyVPC
+    Properties:
+      ClusterName: dev
+  
+  AlbSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupName: alb-sg
+      GroupDescription: "Allow incoming traffic on port 80 and outbound traffic on port 8080"
+      VpcId: !Ref MyVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: !Ref VpcCidrBlock
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: !Ref VpcCidrBlock
+  
+  EcsSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupName: corporate-ecs-app-sg
+      GroupDescription: "Allow incoming traffic on port 8080 and outbound traffic on port 443"
+      VpcId: !Ref MyVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: !Ref VpcCidrBlock
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+  
+  VerifyAccessEndpointSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupName: verify-access-endpoint-sg
+      GroupDescription: "Allow incoming traffic on port 8080 and outbound traffic on port 443"
+      VpcId: !Ref MyVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: !Ref VpcCidrBlock
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: !Ref VpcCidrBlock
+  
+  ApplicationLoadBalancer:
+    Type: "AWS::ElasticLoadBalancingV2::LoadBalancer"
+    Properties:
+      Name: ecs-app-alb
+      Scheme: internal
+      Subnets:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      SecurityGroups: 
+        - !Ref AlbSecurityGroup
+  
+  MyTargetGroup:
+    Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
+    Properties:
+      Name: corporate-app-tg
+      Port: 8080
+      Protocol: HTTP
+      TargetType: ip
+      VpcId: !Ref MyVPC
+
+  AlbListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    DependsOn: MyTargetGroup
+    Properties:
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref MyTargetGroup
+
+  ECSExecutionRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      RoleName: corporate-app-execution-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: "sts:AssumeRole"
+      Path: "/"
+      Policies:
+        - PolicyName: "ECSExecutionPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: "*"
+  
+  EcsTaskDefinition:
+    Type: "AWS::ECS::TaskDefinition"
+    DependsOn: EcsCluster
+    Properties:
+      Memory: "1024"
+      Cpu: "512"
+      Family: corporate-app-td
+      ExecutionRoleArn: !GetAtt ECSExecutionRole.Arn
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      ContainerDefinitions:
+        - Name: corporate-app
+          Image: alejo9424/aws-verified-access-app:latest
+          PortMappings:
+            - ContainerPort: 8080
+
+  ECSService:
+    Type: "AWS::ECS::Service"
+    DependsOn: 
+      - EcsCluster
+      - EcsTaskDefinition
+      - ApplicationLoadBalancer
+      - MyTargetGroup
+      - AlbListener
+    Properties:
+      Cluster: !Ref EcsCluster
+      DesiredCount: 1
+      LaunchType: FARGATE
+      TaskDefinition: !Ref EcsTaskDefinition
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          Subnets:
+            - !Ref PrivateSubnet1
+            - !Ref PrivateSubnet2
+          SecurityGroups:
+            - !Ref EcsSecurityGroup
+      LoadBalancers:
+        - ContainerName: corporate-app
+          ContainerPort: 8080
+          TargetGroupArn: !Ref MyTargetGroup
+# ------------------------------ End ECS section ----------------------------- #
+
+# --------------------- AWS Verified Access section start -------------------- #
+  VerifiedAccessTrustProvider:
+    Type: AWS::EC2::VerifiedAccessTrustProvider
+    Properties: 
+      Description: Default trust provider
+      PolicyReferenceName: TestPolicy
+      TrustProviderType: user
+      UserTrustProviderType: iam-identity-center
+      Tags:
+        - Key: Name
+          Value: verified-access-trust-provider-1
+
+  VerifiedAccessInstance:
+    Type: AWS::EC2::VerifiedAccessInstance
+    Properties: 
+      Description: Test verified instance
+      VerifiedAccessTrustProviderIds: 
+        - !GetAtt VerifiedAccessTrustProvider.VerifiedAccessTrustProviderId
+      Tags:
+        - Key: Name
+          Value: verified-instance-1
+
+  VerifiedAccessGroup:
+    Type: AWS::EC2::VerifiedAccessGroup
+    Properties: 
+      Description: Verified access group test
+      VerifiedAccessInstanceId: !GetAtt VerifiedAccessInstance.VerifiedAccessInstanceId
+      PolicyEnabled: true
+      PolicyDocument: 'permit (principal, action, resource)
+                        when
+                        {
+                            context.http_request.http_method != "INVALID_METHOD"
+                        };'
+      Tags:
+        - Key: Name
+          Value: verified-access-group-1
+
+  VerifiedAccessEndpoint:
+    Type: AWS::EC2::VerifiedAccessEndpoint
+    DependsOn: ApplicationLoadBalancer
+    Properties:
+      ApplicationDomain: aws-verified.awslearn.cloud
+      AttachmentType: vpc
+      Description: Test endpoint associated to ALB internal
+      DomainCertificateArn: arn:aws:acm:us-east-1:224169625704:certificate/9e4dbfb2-e7fd-4384-9f76-cde7e3e10fe6
+      EndpointDomainPrefix: aws-verified
+      EndpointType: load-balancer
+      LoadBalancerOptions: 
+        LoadBalancerArn: !Ref ApplicationLoadBalancer
+        Port: 80
+        Protocol: http
+        SubnetIds: 
+          - !Ref PrivateSubnet1
+          - !Ref PrivateSubnet2
+      SecurityGroupIds:
+        - !Ref VerifyAccessEndpointSecurityGroup
+      VerifiedAccessGroupId: !GetAtt VerifiedAccessGroup.VerifiedAccessGroupId
+      Tags:
+        - Key: Name
+          Value: verified-access-endpoint-1
+
+# ---------------------- AWS Verified Access section end --------------------- #
