@@ -5,6 +5,19 @@ Parameters:
     Type: String
     Default: "10.0.0.0/16"
     Description: CIDR block for the VPC
+  
+  HostedZone:
+    Type: String
+    Description: Route 53 public hosted zone that will be associated with AWS Verified endpoint.
+  
+  PrefixEndpointName:
+    Type: String
+    Default: "aws-verified"
+    Description: The name that you want to assign to verified endpoint domain.
+
+  DomainAcmCertificateArn:
+    Type: String
+    Description: The ACM certificate to associate with the endpoint.
     
 
 Resources:
@@ -324,11 +337,11 @@ Resources:
     Type: AWS::EC2::VerifiedAccessEndpoint
     DependsOn: ApplicationLoadBalancer
     Properties:
-      ApplicationDomain: aws-verified.awslearn.cloud
+      ApplicationDomain: !Sub "${PrefixEndpointName}.${HostedZone}"
       AttachmentType: vpc
       Description: Test endpoint associated to ALB internal
-      DomainCertificateArn: arn:aws:acm:us-east-1:224169625704:certificate/9e4dbfb2-e7fd-4384-9f76-cde7e3e10fe6
-      EndpointDomainPrefix: aws-verified
+      DomainCertificateArn: !Ref DomainAcmCertificateArn
+      EndpointDomainPrefix: !Ref PrefixEndpointName
       EndpointType: load-balancer
       LoadBalancerOptions: 
         LoadBalancerArn: !Ref ApplicationLoadBalancer
@@ -343,5 +356,25 @@ Resources:
       Tags:
         - Key: Name
           Value: verified-access-endpoint-1
+  
+  EndpointDNSRecord:
+    Type: AWS::Route53::RecordSet
+    DependsOn: 
+      - VerifiedAccessEndpoint
+    Properties:
+      HostedZoneName: !Sub "${HostedZone}."
+      Comment: DNS record for AWS Verified endpoint
+      Name: !Sub "${PrefixEndpointName}.${HostedZone}"
+      Type: CNAME
+      TTL: '60'
+      ResourceRecords:
+        - !GetAtt VerifiedAccessEndpoint.EndpointDomain
 
-# ---------------------- AWS Verified Access section end --------------------- #
+# ---------------------- AWS Verified Access section 
+
+# --------------------------- Outputs section start -------------------------- #
+Outputs:
+  UrlVerifyEndpoint:
+    Value: !Sub "https://${PrefixEndpointName}.${HostedZone}"
+    Description: The URL of the verify endpoint.
+# ---------------------------- Output section end ---------------------------- #
