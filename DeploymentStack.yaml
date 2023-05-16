@@ -370,7 +370,7 @@ Resources:
       ResourceRecords:
         - !GetAtt VerifiedAccessEndpoint.EndpointDomain
 
-# ---------------------- AWS Verified Access section 
+# ---------------------- AWS Verified Access section end --------------------- #
 
 # --------------------------- Outputs section start -------------------------- #
 Outputs:
